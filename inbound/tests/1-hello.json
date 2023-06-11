@@ -1,0 +1,14 @@
+{
+    "path": "/api/openai/v1/models",
+    "httpMethod": "GET",
+    "headers": {
+        "Content-Type": "application/json"
+    },
+    "queryStringParameters": {
+        "hello":"world",
+        "chinese":"中文字"
+    },
+    "requestContext": {},
+    "body": "",
+    "isBase64Encoded": false
+}
