@@ -26,43 +26,27 @@ if (!!process.env.ENTRYPOINT_TOKEN){
 }
 
 
-let auth = null;
-let allowed_users = [];
-if (!!process.env.TCB_ENV_ID){
-  const tcb = require('@cloudbase/node-sdk');
-  const app = tcb.init({ env: process.env.TCB_ENV_ID });
-  auth = app.auth();
-
-  if (!!process.env.USER_LIST){
-    allowed_users = process.env.USER_LIST.split(",")
-  }
+let allowed_codes = [];
+if (!!process.env.ALLOWED_CODE_LIST){
+  allowed_codes = process.env.ALLOWED_CODE_LIST.split(",")
 }
-
 
 module.exports.main = async function (req) {
     try {
       console.log("Clinet Request: " + JSON.stringify(req));
-
-      delete req.headers["x-forwarded-for"];
-      delete req.headers["x-forwarded-proto"];
-      delete req.headers["x-forwarded-host"];
-      delete req.headers["x-origin-host"];
-      delete req.headers["x-real-ip"];
-
-      const {
-        openId, //微信openId，非微信授权登录则空
-        appId, //微信appId，非微信授权登录则空
-        uid, //用户唯一ID
-        customUserId //开发者自定义的用户唯一id，非自定义登录则空
-      } = auth.getUserInfo();
       
-      console.log("UserInfo:", {openId, appId, uid, customUserId});
+      let accessCode = ""
+      if (!!req.headers["authorization"] && req.headers["authorization"].startsWith("Bearer ak-")){
+        accessCode = req.headers["authorization"].substr("Bearer ak-".length)
+      }
 
-      if (allowed_users.length > 0 && allowed_users.indexOf(openId) < 0){
+      console.log("Client access code:" + accessCode);
+
+      if (allowed_codes.length > 0 && (!accessCode || allowed_codes.indexOf(accessCode) < 0)){
         return {
-          statusCode: 403,
+          statusCode: !accessCode ? 401 : 403,
           isBase64Encoded: false,
-          body: `user '${openId}' not allowed`
+          body: !accessCode ? "UnAuthorized" : `Code '${accessCode}' not allowed.`
         };
       }
 
@@ -101,6 +85,7 @@ async function handleProxy(request){
     method: request.httpMethod,
     headers: {
       "Content-Type": "application/json",
+      "User-Agent": request.headers["user-agent"],
       Authorization: OpenAIBearerToken,
       ...(OpenAIOrgID && {
         "OpenAI-Organization": OpenAIOrgID,
