@@ -1,38 +1,76 @@
 'use strict';
 
+const AzureApiVersion="2023-05-15"
+
 // The name of your Azure OpenAI Resource.
 const AzureAPIResourceName=""
+if (!!process.env.AOAI_RESOURCE_NAME){
+  AzureAPIResourceName = process.env.AOAI_RESOURCE_NAME
+}
+
 const AzureAPIKey=""
+if (!!process.env.AOAI_KEY){
+  AzureAPIKey = process.env.AOAI_KEY
+}
+
 // The deployment name you chose when you deployed the model.
 const modelMapping = {
   'gpt-3.5-turbo': "",    // DEPLOY_NAME_GPT35,
   'gpt-4': ""             // DEPLOY_NAME_GPT4
 };
-const AzureApiVersion="2023-05-15"
+if (!!process.env.DEPLOY_NAME_GPT35){
+  modelMapping["gpt-3.5-turbo"] = process.env.DEPLOY_NAME_GPT35
+}
+if (!!process.env.DEPLOY_NAME_GPT4){
+  modelMapping["gpt-4"] = process.env.DEPLOY_NAME_GPT4
+}
+
+let allowed_codes = [];
+if (!!process.env.ALLOWED_CODE_LIST){
+  allowed_codes = process.env.ALLOWED_CODE_LIST.split(",")
+}
+
 
 module.exports.main = async function (req) {
-    try {
-      console.log("Requesting: " + JSON.stringify(req));
+  try {
+    console.log("Clinet Request: " + JSON.stringify(req));
+    
+    let accessCode = ""
+    if (!!req.headers["authorization"] && req.headers["authorization"].startsWith("Bearer ak-")){
+      accessCode = req.headers["authorization"].substr("Bearer ak-".length)
+    }
 
-      const res = await handleRequest(req)
+    console.log("Client access code:" + accessCode);
+
+    if (allowed_codes.length > 0 && (!accessCode || allowed_codes.indexOf(accessCode) < 0)){
       return {
-        statusCode: res.status,
-        headers: res.headers,
-        body: res.body
-      };
-    }catch ( ex ) {
-      console.log("Error: " + ex.toString())
-      return {
-        statusCode: 500,
-        body: "Internal server error"
+        statusCode: !accessCode ? 401 : 403,
+        isBase64Encoded: false,
+        body: !accessCode ? "UnAuthorized" : `Code '${accessCode}' not allowed.`
       };
     }
+
+    const res = await handleProxy(req)
+    return {
+      isBase64Encoded: false,
+      statusCode: res.statusCode,
+      headers: res.headers,
+      body: res.body
+    };
+  }catch ( ex ) {
+    console.error("UnhandledException: " + ex.toString());
+
+    return {
+      statusCode: 500,
+      body: "Internal server error"
+    };
+  }
 };
 
 
-async function handleRequest(request) {
+async function handleProxy(request) {
   let path = request.path;
-  path = path.replace("/api/openai", "");
+  path = path.replace("/api/azure", "");
 
   switch(request.path){
     case '/v1/chat/completions':
@@ -72,14 +110,6 @@ async function handleProxy(request, pathRewrite){
   }
 
   const fetchUrl = `https://${AzureAPIResourceName}.openai.azure.com/openai/deployments/${deployName}/${pathRewrite}?api-version=${AzureApiVersion}`
-
-  // const authKey = request.headers['Authorization'];
-  // if (!authKey) {
-  //   return new Response("Not allowed", {
-  //     status: 403
-  //   });
-  // }
-
   const requestOptions = {
     url: fetchUrl,
     method: request.httpMethod,
@@ -91,23 +121,15 @@ async function handleProxy(request, pathRewrite){
     timeout: 10000
   };
 
-
-  return {
-    statusCode: 200,
-    headers:{
-      "Content-Type": "text/plain"
-    },
-    body: "Azure API Request URL: " + fetchUrl + "\n" + "Azure API Request Options:\n" + JSON.stringify(requestOptions)
-  }
-
+  console.log("Azure OpenAI Request: " + JSON.stringify(requestOptions));
   const response = await requestAsync(requestOptions);
-  delete response.headers["www-authenticate"]
-  response.headers["Access-Control-Allow-Origin"]="*";
-  return {
+  const resp = {
     statusCode: response.statusCode,
     headers: response.headers,
     body: response.body
-  }
+  };
+  console.log("Azure OpenAI Response: " + JSON.stringify(resp));
+  return resp;
 }
 
 
@@ -118,6 +140,10 @@ async function handleModels(request) {
   };
 
   for (let key in modelMapping) {
+    if(!modelMapping[key]){
+      continue;
+    }
+
     data.data.push({
       "id": key,
       "object": "model",
