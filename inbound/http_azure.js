@@ -3,14 +3,14 @@
 const AzureApiVersion="2023-05-15"
 
 // The name of your Azure OpenAI Resource.
-const AzureAPIResourceName=""
+let AzureAPIResourceName=""
 if (!!process.env.AOAI_RESOURCE_NAME){
-  AzureAPIResourceName = process.env.AOAI_RESOURCE_NAME
+  AzureAPIResourceName = process.env.AOAI_RESOURCE_NAME;
 }
 
-const AzureAPIKey=""
+let AzureAPIKey=""
 if (!!process.env.AOAI_KEY){
-  AzureAPIKey = process.env.AOAI_KEY
+  AzureAPIKey = process.env.AOAI_KEY;
 }
 
 // The deployment name you chose when you deployed the model.
@@ -19,15 +19,15 @@ const modelMapping = {
   'gpt-4': ""             // DEPLOY_NAME_GPT4
 };
 if (!!process.env.DEPLOY_NAME_GPT35){
-  modelMapping["gpt-3.5-turbo"] = process.env.DEPLOY_NAME_GPT35
+  modelMapping["gpt-3.5-turbo"] = process.env.DEPLOY_NAME_GPT35;
 }
 if (!!process.env.DEPLOY_NAME_GPT4){
-  modelMapping["gpt-4"] = process.env.DEPLOY_NAME_GPT4
+  modelMapping["gpt-4"] = process.env.DEPLOY_NAME_GPT4;
 }
 
 let allowed_codes = [];
 if (!!process.env.ALLOWED_CODE_LIST){
-  allowed_codes = process.env.ALLOWED_CODE_LIST.split(",")
+  allowed_codes = process.env.ALLOWED_CODE_LIST.split(",");
 }
 
 
@@ -35,7 +35,7 @@ module.exports.main = async function (req) {
   try {
     console.log("Clinet Request: " + JSON.stringify(req));
     
-    let accessCode = ""
+    let accessCode = "";
     if (!!req.headers["authorization"] && req.headers["authorization"].startsWith("Bearer ak-")){
       accessCode = req.headers["authorization"].substr("Bearer ak-".length)
     }
@@ -50,7 +50,7 @@ module.exports.main = async function (req) {
       };
     }
 
-    const res = await handleProxy(req)
+    const res = await handleRequest(req)
     return {
       isBase64Encoded: false,
       statusCode: res.statusCode,
@@ -68,8 +68,8 @@ module.exports.main = async function (req) {
 };
 
 
-async function handleProxy(request) {
-  let path = request.path;
+async function handleRequest(request) {
+let path = request.path;
   path = path.replace("/api/azure", "");
 
   switch(request.path){
@@ -89,7 +89,8 @@ async function handleProxy(request) {
   }
 }
 
-const requestAsync = require('util').promisify(require("request"));
+
+const requestAsync = require('util').promisify( require('request') );
 const base64js = require('base64-js');
 
 async function handleProxy(request, pathRewrite){
@@ -98,14 +99,19 @@ async function handleProxy(request, pathRewrite){
   if ( request.isBase64Encoded ) {
     reqBody = base64js.toByteArray(reqBody.body);
   }
-  const body = JSON.parse(reqBody)
-  const modelName = body?.model;  
-  const deployName = modelMapping[modelName] || '' 
 
-  if (deployName === '') {
+  let modelName = '';
+  let deployName='';
+  if (!!reqBody){
+    const body = JSON.parse(reqBody);
+    modelName = body && body.model;  
+    deployName = modelMapping[modelName] || '';
+  }
+
+  if (!deployName) {
     return {
         statusCode: 400,
-        body: `unsupported model ${$modelName}`
+        body: `unsupported model ${modelName}`
     };
   }
 
@@ -117,7 +123,7 @@ async function handleProxy(request, pathRewrite){
       "Content-Type": "application/json",
       "api-key": AzureAPIKey,
     },
-    body: typeof body === 'object' ? JSON.stringify(body) : null,
+    body: reqBody,
     timeout: 10000
   };
 
