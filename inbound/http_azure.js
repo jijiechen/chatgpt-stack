@@ -124,7 +124,7 @@ async function handleProxy(request, pathRewrite){
       "api-key": AzureAPIKey,
     },
     body: reqBody,
-    timeout: 10000
+    timeout: 20000
   };
 
   console.log("Azure OpenAI Request: " + JSON.stringify(requestOptions));
