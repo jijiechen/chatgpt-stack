@@ -58,7 +58,8 @@ module.exports.main = async function (req) {
       body: res.body
     };
   }catch ( ex ) {
-    console.error("UnhandledException: " + ex.toString());
+    console.error("unhandledException: " + ex.message);
+    console.error(ex.stack);
 
     return {
       statusCode: 500,
@@ -181,3 +182,9 @@ async function handleModels(request) {
     body: json
   };
 }
+
+
+process.on('uncaughtException', function(err){
+  console.error('uncaughtException causing crash: ' + err.message);
+  console.error(err.stack);
+});
