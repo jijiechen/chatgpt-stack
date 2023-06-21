@@ -76,10 +76,10 @@ let path = request.path;
   switch(request.path){
     case '/v1/chat/completions':
       path="chat/completions";
-      return handleProxy(request, path);
+      return await handleProxy(request, path, false);
     case '/v1/completions':
       path="completions"
-      return handleProxy(request, path);
+      return await handleProxy(request, path, false);
     case '/v1/models':
       return handleModels(request)
     default:
@@ -94,7 +94,7 @@ let path = request.path;
 const requestAsync = require('util').promisify( require('request') );
 const base64js = require('base64-js');
 
-async function handleProxy(request, pathRewrite){
+async function handleProxy(request, pathRewrite, retrying){
   let reqBody = request.body;
   
   if ( request.isBase64Encoded ) {
@@ -129,14 +129,32 @@ async function handleProxy(request, pathRewrite){
   };
 
   console.log("Azure OpenAI Request: " + JSON.stringify(requestOptions));
-  const response = await requestAsync(requestOptions);
-  const resp = {
-    statusCode: response.statusCode,
-    headers: response.headers,
-    body: response.body
-  };
-  console.log("Azure OpenAI Response: " + JSON.stringify(resp));
-  return resp;
+
+  try{
+    const response = await requestAsync(requestOptions);
+    const resp = {
+      statusCode: response.statusCode,
+      headers: response.headers,
+      body: response.body
+    };
+    console.log("Azure OpenAI Response: " + JSON.stringify(resp));
+    return resp;
+  }catch(ex){
+    const recoverableErrors = ['ESOCKETTIMEDOUT', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED'];
+    if (recoverableErrors.indexOf(ex.code) > -1 ){
+      if (!retrying){
+        console.log(`Error '${ex.code}', retrying...`);
+        await sleep(1000 + Math.floor(Math.random() * 1500));
+        return await handleProxy(request, pathRewrite, true);
+      }else{
+        console.log(`Error '${ex.code}', error in a retry, giving up.`);
+        throw ex;
+      }
+    }else{
+      console.log(`Error '${ex.code}', not recoverable.`);
+      throw ex;
+    }
+  }
 }
 
 
@@ -183,6 +201,9 @@ async function handleModels(request) {
   };
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 process.on('uncaughtException', function(err){
   console.error('uncaughtException causing crash: ' + err.message);
