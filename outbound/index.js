@@ -58,8 +58,8 @@ function onRequest(client_req, client_res) {
       end: true
     });
   }catch(ex){
-    console.warn('error: ' + err.message);
-    console.warn(err.stack);
+    console.warn('error: ' + ex.message);
+    console.warn(ex.stack);
 
     try{
       client_res.writeHead(500, {
