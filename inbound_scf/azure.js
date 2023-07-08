@@ -25,11 +25,7 @@ if (!!process.env.DEPLOY_NAME_GPT4){
   modelMapping["gpt-4"] = process.env.DEPLOY_NAME_GPT4;
 }
 
-let allowed_codes = [];
-if (!!process.env.ALLOWED_CODE_LIST){
-  allowed_codes = process.env.ALLOWED_CODE_LIST.split(",");
-}
-
+const allowed_codes = readAccessCodes();
 
 module.exports.main = async function (req) {
   try {
@@ -40,14 +36,19 @@ module.exports.main = async function (req) {
       accessCode = req.headers["authorization"].substr("Bearer ak-".length)
     }
 
-    console.log("Client access code:" + accessCode);
+    if (!!allowed_codes){
+      if (!accessCode || !allowed_codes[accessCode]){
+        console.log("Access denied!");
 
-    if (allowed_codes.length > 0 && (!accessCode || allowed_codes.indexOf(accessCode) < 0)){
-      return {
-        statusCode: !accessCode ? 401 : 403,
-        isBase64Encoded: false,
-        body: !accessCode ? "UnAuthorized" : `Code '${accessCode}' not allowed.`
-      };
+        return {
+          statusCode: !accessCode ? 401 : 403,
+          isBase64Encoded: false,
+          body: !accessCode ? "UnAuthorized" : `Code '${accessCode}' not allowed.`
+        };
+      }
+      console.log("Client user:" + allowed_codes[accessCode]);
+    }else{
+      console.log("auth disabled");
     }
 
     const res = await handleRequest(req)
@@ -85,7 +86,7 @@ let path = request.path;
     default:
       return {
         statusCode: 404,
-        body: `no resource not found at ${request.path}`
+        body: `no resource found at ${request.path}`
       };
   }
 }
@@ -203,6 +204,43 @@ async function handleModels(request) {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function readAccessCodes(){
+  const fs = require('fs');
+  const accessCodesFile = './access-codes.json';
+  let accessCodeContent = '';
+
+  try {
+    if (!fs.existsSync(accessCodesFile)) {
+      console.error(`no such file: ${accessCodesFile}`);
+      return null;
+    }
+    accessCodeContent = fs.readFileSync(accessCodesFile, { encoding: 'utf8', flag: 'r' });
+  } catch(err) {
+    console.error(`error reading ${accessCodesFile}: ${err.message}`);
+    return null;
+  }
+
+  try {
+    const nameValuePair = JSON.parse(accessCodeContent);
+    const valueNamePair = {};
+    for(const name in nameValuePair){
+      if (nameValuePair.hasOwnProperty(name)){
+        if(!!valueNamePair[ nameValuePair[name]]){
+          console.warn(`duplicated access key ignored in ${accessCodesFile}. user: ${name}`);
+          continue;
+        }
+
+        valueNamePair[ nameValuePair[name] ] = name;
+      }
+    }
+
+    return valueNamePair;
+  }catch(err){
+    console.error(`error parsing ${accessCodesFile}: ${err.message}`);
+    return null;
+  }
 }
 
 process.on('uncaughtException', function(err){
