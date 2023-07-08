@@ -16,10 +16,15 @@ if (!!process.env.AOAI_KEY){
 // The deployment name you chose when you deployed the model.
 const modelMapping = {
   'gpt-3.5-turbo': "",    // DEPLOY_NAME_GPT35,
+  'gpt-3.5-turbo-0301': "",    // DEPLOY_NAME_GPT35_0301,
   'gpt-4': ""             // DEPLOY_NAME_GPT4
 };
+
 if (!!process.env.DEPLOY_NAME_GPT35){
   modelMapping["gpt-3.5-turbo"] = process.env.DEPLOY_NAME_GPT35;
+}
+if (!!process.env.DEPLOY_NAME_GPT35_0301){
+  modelMapping["gpt-3.5-turbo-0301"] = process.env.DEPLOY_NAME_GPT35_0301;
 }
 if (!!process.env.DEPLOY_NAME_GPT4){
   modelMapping["gpt-4"] = process.env.DEPLOY_NAME_GPT4;
@@ -29,8 +34,6 @@ const allowed_codes = readAccessCodes();
 
 module.exports.main = async function (req) {
   try {
-    console.log("Clinet Request: " + JSON.stringify(req));
-    
     let accessCode = "";
     if (!!req.headers["authorization"] && req.headers["authorization"].startsWith("Bearer ak-")){
       accessCode = req.headers["authorization"].substr("Bearer ak-".length)
@@ -48,10 +51,16 @@ module.exports.main = async function (req) {
       }
       console.log("Client user:" + allowed_codes[accessCode]);
     }else{
-      console.log("auth disabled");
+      console.log("Auth disabled");
+      readAccessCodes();
     }
 
-    const res = await handleRequest(req)
+    const res = await handleRequest(req);
+    if(res.statusCode && res.statusCode >= 400){
+      console.log("Client request:" + JSON.stringify(req));
+      console.log("Bad response:" + JSON.stringify(res));
+    }
+
     return {
       isBase64Encoded: false,
       statusCode: res.statusCode,
@@ -129,8 +138,6 @@ async function handleProxy(request, pathRewrite, retrying){
     timeout: 20000
   };
 
-  console.log("Azure OpenAI Request: " + JSON.stringify(requestOptions));
-
   try{
     const response = await requestAsync(requestOptions);
     const resp = {
@@ -138,7 +145,6 @@ async function handleProxy(request, pathRewrite, retrying){
       headers: response.headers,
       body: response.body
     };
-    console.log("Azure OpenAI Response: " + JSON.stringify(resp));
     return resp;
   }catch(ex){
     const recoverableErrors = ['ESOCKETTIMEDOUT', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED'];
@@ -160,7 +166,7 @@ async function handleProxy(request, pathRewrite, retrying){
 
 
 async function handleModels(request) {
-  const data = {
+  const modelList = {
     "object": "list",
     "data": []  
   };
@@ -170,7 +176,7 @@ async function handleModels(request) {
       continue;
     }
 
-    data.data.push({
+    modelList.data.push({
       "id": key,
       "object": "model",
       "created": 1677610602,
@@ -194,7 +200,7 @@ async function handleModels(request) {
     });  
   }
 
-  const json = JSON.stringify(data, null, 2);
+  const json = JSON.stringify(modelList, null, 2);
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json' },
