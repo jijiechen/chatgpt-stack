@@ -10,19 +10,44 @@ process.on('uncaughtException', function(err){
 
 http.createServer(onRequest).listen(9000);
 
+const allowed_codes = readAccessCodes();
 
 const azure = require("./azure.js");
+const openai = require("./openai.js");
 
 async function onRequest(client_req, client_res) {
   const requestId = client_req.headers["x-api-requestid"] || "(empty)";
   try{
-    if (!hasPrefix(client_req.url, "/api/azure")){
-      localReply(client_res, 404, `no resource can be found at ${client_req.url}`)
-      return;
+    let accessCode = "";
+    if (!!client_req.headers["authorization"] && client_req.headers["authorization"].startsWith("Bearer ak-")){
+      accessCode = client_req.headers["authorization"].substr("Bearer ak-".length)
+    }
+
+    if (!!allowed_codes){
+      if (!accessCode || !allowed_codes[accessCode]){
+        const statusCode = !accessCode ? 401 : 403;
+        const responseText = !accessCode ? "UnAuthorized" : `Code '${accessCode}' not allowed.`
+
+        console.log("Access denied: " + responseText);
+        localReply(client_res, statusCode, responseText)
+        return;
+      }
+      console.log("Client user:" + allowed_codes[accessCode]);
+    } else {
+      console.log("Auth disabled");
+      readAccessCodes();
     }
 
     const ccbReq = await convertToRequestObject(client_req, "/api/azure");
-    const ccbResponse = await azure.main(ccbReq);
+    let ccbResponse;
+    if (hasPrefix(client_req.url, "/api/azure")){
+      ccbResponse = await azure.main(ccbReq);
+    }else if (hasPrefix(client_req.url, "/api/openai")){
+      ccbResponse = await openai.main(ccbReq);
+    }else{
+      localReply(client_res, 404, `no resource can be found at ${client_req.url}`)
+      return;
+    }
 
     client_res.writeHead(ccbResponse.statusCode, ccbResponse.headers);
     if(!!ccbResponse.body != null){
@@ -97,11 +122,56 @@ function getRequestBody(request) {
   });
 }
 
-function localReply(client_res, statusCode, content){
-  client_res.writeHead(statusCode, {
-    "Content-Type": "text/plain"
-  });
-  client_res.end(content);
+function localReply(client_res, statusCode, content, headers){
+  if (!headers){
+    headers = {}
+  }
+  if (!headers["Content-Type"] || !headers["content-type"]){
+    headers["Content-Type"] = "text/plain";
+  }
+  client_res.writeHead(statusCode, headers);
+
+  if(!!content && typeof content === "object"){
+    content = JSON.stringify(content)
+  }
+  client_res.end(content || '');
+}
+
+function readAccessCodes(){
+  const fs = require('fs');
+  const accessCodesFile = './access-codes.json';
+  let accessCodeContent = '';
+
+  try {
+    if (!fs.existsSync(accessCodesFile)) {
+      console.error(`no such file: ${accessCodesFile}`);
+      return null;
+    }
+    accessCodeContent = fs.readFileSync(accessCodesFile, { encoding: 'utf8', flag: 'r' });
+  } catch(err) {
+    console.error(`error reading ${accessCodesFile}: ${err.message}`);
+    return null;
+  }
+
+  try {
+    const nameValuePair = JSON.parse(accessCodeContent);
+    const valueNamePair = {};
+    for(const name in nameValuePair){
+      if (nameValuePair.hasOwnProperty(name)){
+        if(!!valueNamePair[ nameValuePair[name]]){
+          console.warn(`duplicated access key ignored in ${accessCodesFile}. user: ${name}`);
+          continue;
+        }
+
+        valueNamePair[ nameValuePair[name] ] = name;
+      }
+    }
+
+    return valueNamePair;
+  }catch(err){
+    console.error(`error parsing ${accessCodesFile}: ${err.message}`);
+    return null;
+  }
 }
 
 function hasPrefix(s, prefix){
