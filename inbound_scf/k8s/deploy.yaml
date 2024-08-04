@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: openai-proxy
+  name: openai-proxy
+  namespace: jijiechen-openai-api
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 2
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: openai-proxy
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: openai-proxy
+    spec:
+      automountServiceAccountToken: true
+      containers:
+      - name: app
+        env:
+        - name: ENTRYPOINT_TOKEN
+          value: "-"
+        - name: OPENAI_BASE_URL
+          value: "-"
+        - name: OPENAI_ORG_ID
+          value: "-"
+        - name: OPENAI_TOKEN
+          value: "-"
+        - name: AOAI_KEY
+          value: "-"
+        - name: AOAI_RESOURCE_NAME
+          value: "-"
+        - name: DEPLOY_NAME_GPT35
+          value: "-"
+        - name: DEPLOY_NAME_GPT4
+          value: "-"
+        image: ccr.ccs.tencentyun.com/teamycloud/jijiechen-chatgpt-api:20240804
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 8443
+          name: https
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          periodSeconds: 10
+          failureThreshold: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+          initialDelaySeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          periodSeconds: 5
+          failureThreshold: 2
+          successThreshold: 1
+          timeoutSeconds: 3
+        resources:
+          requests:
+            cpu: 200m
+            memory: 128Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+        volumeMounts:
+        - mountPath: /app/access-codes.json
+          name: proxy-access-codes
+          readOnly: true
+          subPath: access-codes.json
+        - mountPath: /app/certs/server.crt
+          name: proxy-cert
+          readOnly: true
+          subPath: tls.crt
+        - mountPath: /app/certs/server.key
+          name: proxy-cert
+          readOnly: true
+          subPath: tls.key
+      dnsPolicy: ClusterFirst
+      nodeSelector:
+        kubernetes.io/os: linux
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: proxy-cert
+        secret:
+          defaultMode: 420
+          secretName: proxy-cert
+      - configMap:
+          defaultMode: 420
+          name: proxy-access-codes
+        name: proxy-access-codes

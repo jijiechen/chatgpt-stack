@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: openai-proxy
+  name: openai-proxy
+  namespace: jijiechen-openai-api
+spec:
+  ports:
+  - name: diagnostics
+    port: 443
+    nodePort: 443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app: openai-proxy
+  type: NodePort
