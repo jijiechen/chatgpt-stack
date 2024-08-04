@@ -25,16 +25,22 @@ if (!!process.env.ENTRYPOINT_TOKEN){
   Entrypoint_Token = process.env.ENTRYPOINT_TOKEN;
 }
 
-module.exports.main = async function (req) {
+module.exports.main = async function (client_req, client_res, reqInfo) {
     try {
-      console.log("Clinet Request: " + JSON.stringify(req));
-      const res = await handleProxy(req)
-      return {
-        isBase64Encoded: false,
-        statusCode: res.statusCode,
-        headers: res.headers,
-        body: res.body
-      };
+      console.log("Client request:" + JSON.stringify(reqInfo));
+      const res = await handleProxy(client_req, client_res, reqInfo);
+      if(!!res && !!res.statusCode && res.statusCode >= 400){
+        console.log("Bad response:" + JSON.stringify(res));
+      }
+
+      if (!!res && !!res.statusCode){
+        return {
+          isBase64Encoded: false,
+          statusCode: res.statusCode,
+          headers: res.headers,
+          body: res.body
+        };
+      }
     } catch ( ex ) {
       console.error("unhandledException: " + ex.message);
       console.error(ex.stack);
@@ -46,48 +52,77 @@ module.exports.main = async function (req) {
     }
 };
 
-const requestAsync = require('util').promisify(require("request"));
-const base64js = require('base64-js');
-
-async function handleProxy(request){
-  let reqBody = request.body;
+const https = require('https');
+async function handleProxy(request, response, reqInfo, retrying){
+  const fetchUrl = parseUrl(`${OpenAIBaseUrl}${reqInfo.path}${buildQueryString(reqInfo.query)}`);
+  try{
+    request.headers.host = fetchUrl.host;
+    delete request.headers["authorization"];
+    var options = {
+      hostname: request.headers.host,
+      port: 443,
+      path: fetchUrl.path + fetchUrl.query,
+      method: request.method,
+      headers: {
+        ...(OpenAIBearerToken && {
+          "Authorization": OpenAIBearerToken,
+        }),
+        ...(OpenAIOrgID && {
+          "OpenAI-Organization": OpenAIOrgID,
+        }),
+        ...(Entrypoint_Token && {
+          "x-entrypoint-token": Entrypoint_Token,
+        }),
+        ...request.headers
+      },
+      protocol: "https:",
+      timeout: 58000
+    };
   
-  if ( request.isBase64Encoded ) {
-    reqBody = base64js.toByteArray(reqBody.body);
+    var proxy = https.request(options, function (res) {
+      response.writeHead(res.statusCode, res.headers)
+      res.pipe(response, {
+        end: true
+      });
+    });
+  
+    request.pipe(proxy, {
+      end: true
+    });
+  }catch(ex){
+    const recoverableErrors = ['ESOCKETTIMEDOUT', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED'];
+    if (recoverableErrors.indexOf(ex.code) > -1 ){
+      if (!retrying){
+        console.log(`Error '${ex.code}', retrying...`);
+        await sleep(1000 + Math.floor(Math.random() * 1500));
+        return await handleProxy(request, response, reqInfo, true);
+      }else{
+        console.log(`Error '${ex.code}', error in a retry, giving up.`);
+        throw ex;
+      }
+    }else{
+      console.log(`Error '${ex.code}', not recoverable.`);
+      throw ex;
+    }
+  }
+}
+
+function parseUrl(url){
+  const indexOfHost = url.indexOf("//") + 2;
+  let indexOfPath = indexOfHost + url.substr(indexOfHost).indexOf("/");
+  let indexOfQuery = url.lastIndexOf("?");
+
+  if (indexOfPath === -1){
+    indexOfPath = url.length;
+  }
+  if (indexOfQuery === -1){
+    indexOfQuery = url.length;
   }
 
-  const openaiPath = request.path.replace("/api/openai", "");
-  const fetchUrl = `${OpenAIBaseUrl}${openaiPath}${buildQueryString(request.queryStringParameters)}`;
-
-  const requestOptions = {
-    url: fetchUrl,
-    method: request.httpMethod,
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": request.headers["user-agent"],
-      ...(OpenAIBearerToken && {
-        "Authorization": OpenAIBearerToken,
-      }),
-      ...(OpenAIOrgID && {
-        "OpenAI-Organization": OpenAIOrgID,
-      }),
-      ...(Entrypoint_Token && {
-        "x-entrypoint-token": Entrypoint_Token,
-      }),
-    },
-    body: reqBody || null,
-    timeout: 10000
-  };
-
-  console.log("OpenAI Request: " + JSON.stringify(requestOptions));
-  const response = await requestAsync(requestOptions);
-  delete response.headers["www-authenticate"]
-
   return {
-    isBase64Encoded: false,
-    statusCode: response.statusCode,
-    headers: response.headers,
-    body: response.body
+    host: url.substr(indexOfHost, indexOfPath - indexOfHost), 
+    path: url.substr(indexOfPath, indexOfQuery - indexOfPath),
+    query: url.substr(indexOfQuery)
   }
 }
 

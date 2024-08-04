@@ -30,20 +30,25 @@ if (!!process.env.DEPLOY_NAME_GPT4){
   modelMapping["gpt-4"] = process.env.DEPLOY_NAME_GPT4;
 }
 
-module.exports.main = async function (req) {
+module.exports.main = async function (client_req, client_res, reqInfo) {
   try {
-    const res = await handleRequest(req);
-    if(res.statusCode && res.statusCode >= 400){
-      console.log("Client request:" + JSON.stringify(req));
+    console.log("Client request:" + JSON.stringify(reqInfo));
+    const res = await handleRequest(client_req, client_res, reqInfo);
+    if(!!res && !!res.statusCode && res.statusCode >= 400){
       console.log("Bad response:" + JSON.stringify(res));
     }
+    
+    if (!!res && !!res.statusCode){
+      return {
+        isBase64Encoded: false,
+        statusCode: res.statusCode,
+        headers: res.headers,
+        body: res.body
+      };
+    }
 
-    return {
-      isBase64Encoded: false,
-      statusCode: res.statusCode,
-      headers: res.headers,
-      body: res.body
-    };
+    // response was streamed, don't return explicitly
+    return null;
   }catch ( ex ) {
     console.error("unhandledException: " + ex.message);
     console.error(ex.stack);
@@ -56,80 +61,71 @@ module.exports.main = async function (req) {
 };
 
 
-async function handleRequest(request) {
-let path = request.path;
-  path = path.replace("/api/azure", "");
+async function handleRequest(request, response, reqInfo) {
+  let path = reqInfo.path;
 
-  switch(request.path){
+  switch(path){
     case '/v1/chat/completions':
       path="chat/completions";
-      return await handleProxy(request, path, false);
+      return await handleProxy(request, response, path, false);
     case '/v1/completions':
       path="completions"
-      return await handleProxy(request, path, false);
+      return await handleProxy(request, response, path, false);
     case '/v1/models':
       return handleModels(request)
     default:
       return {
         statusCode: 404,
-        body: `no resource found at ${request.path}`
+        body: `no resource found at ${request.url}`
       };
   }
 }
 
 
-const requestAsync = require('util').promisify( require('request') );
-const base64js = require('base64-js');
-
-async function handleProxy(request, pathRewrite, retrying){
-  let reqBody = request.body;
-  
-  if ( request.isBase64Encoded ) {
-    reqBody = base64js.toByteArray(reqBody.body);
-  }
-
-  let modelName = '';
-  let deployName='';
-  if (!!reqBody){
-    const body = JSON.parse(reqBody);
-    modelName = body && body.model;  
-    deployName = modelMapping[modelName] || '';
-  }
-
+const https = require('https');
+async function handleProxy(request, response, pathRewrite, retrying){
+  let modelName = request.headers["x-model-name"];
+  let deployName= modelMapping[modelName] || '';
   if (!deployName) {
     return {
-        statusCode: 400,
-        body: `unsupported model ${modelName}`
+      statusCode: 400,
+      body: `unsupported model ${modelName}`
     };
   }
-
-  const fetchUrl = `https://${AzureAPIResourceName}.openai.azure.com/openai/deployments/${deployName}/${pathRewrite}?api-version=${AzureApiVersion}`
-  const requestOptions = {
-    url: fetchUrl,
-    method: request.httpMethod,
-    headers: {
-      "Content-Type": "application/json",
-      "api-key": AzureAPIKey,
-    },
-    body: reqBody,
-    timeout: 20000
-  };
-
+  
   try{
-    const response = await requestAsync(requestOptions);
-    const resp = {
-      statusCode: response.statusCode,
-      headers: response.headers,
-      body: response.body
+    delete request.headers["x-model-name"];
+    request.headers.host = `${AzureAPIResourceName}.openai.azure.com`;
+    var options = {
+      hostname: request.headers.host,
+      port: 443,
+      path: `/openai/deployments/${deployName}/${pathRewrite}?api-version=${AzureApiVersion}`,
+      method: request.method,
+      headers: {
+        "api-key": AzureAPIKey,
+        ...request.headers
+      },
+      protocol: "https:",
+      timeout: 58000
     };
-    return resp;
+  
+    var proxy = https.request(options, function (res) {
+      response.writeHead(res.statusCode, res.headers)
+      res.pipe(response, {
+        end: true
+      });
+    });
+  
+    request.pipe(proxy, {
+      end: true
+    });
   }catch(ex){
     const recoverableErrors = ['ESOCKETTIMEDOUT', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED'];
     if (recoverableErrors.indexOf(ex.code) > -1 ){
       if (!retrying){
         console.log(`Error '${ex.code}', retrying...`);
         await sleep(1000 + Math.floor(Math.random() * 1500));
-        return await handleProxy(request, pathRewrite, true);
+        return await handleProxy(request, response, pathRewrite, true);
       }else{
         console.log(`Error '${ex.code}', error in a retry, giving up.`);
         throw ex;

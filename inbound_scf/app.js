@@ -18,39 +18,25 @@ const openai = require("./openai.js");
 async function onRequest(client_req, client_res) {
   const requestId = client_req.headers["x-api-requestid"] || "(empty)";
   try{
-    let accessCode = "";
-    if (!!client_req.headers["authorization"] && client_req.headers["authorization"].startsWith("Bearer ak-")){
-      accessCode = client_req.headers["authorization"].substr("Bearer ak-".length)
-    }
+    if (!tryAuthorize(client_req, client_res)){
+      return;
+    };
 
-    if (!!allowed_codes){
-      if (!accessCode || !allowed_codes[accessCode]){
-        const statusCode = !accessCode ? 401 : 403;
-        const responseText = !accessCode ? "UnAuthorized" : `Code '${accessCode}' not allowed.`
-
-        console.log("Access denied: " + responseText);
-        localReply(client_res, statusCode, responseText)
-        return;
-      }
-      console.log("Client user:" + allowed_codes[accessCode]);
-    } else {
-      console.log("Auth disabled");
-      readAccessCodes();
-    }
-
-    const ccbReq = await convertToRequestObject(client_req, "/api/azure");
+    let reqInfo;
     let ccbResponse;
     if (hasPrefix(client_req.url, "/api/azure")){
-      ccbResponse = await azure.main(ccbReq);
+      reqInfo = getRequestInfo(client_req, "/api/azure");
+      ccbResponse = await azure.main(client_req, client_res, reqInfo);
     }else if (hasPrefix(client_req.url, "/api/openai")){
-      ccbResponse = await openai.main(ccbReq);
+      reqInfo = getRequestInfo(client_req, "/api/openai");
+      ccbResponse = await openai.main(client_req, client_res, reqInfo);
     }else{
       localReply(client_res, 404, `no resource can be found at ${client_req.url}`)
       return;
     }
 
-    client_res.writeHead(ccbResponse.statusCode, ccbResponse.headers);
-    if(!!ccbResponse.body != null){
+    if(!!ccbResponse && !!ccbResponse.statusCode){
+      client_res.writeHead(ccbResponse.statusCode, ccbResponse.headers);
       client_res.end(ccbResponse.body);
     }
 
@@ -68,7 +54,8 @@ async function onRequest(client_req, client_res) {
   }
 }
 
-async function convertToRequestObject(client_req, removePrefix){
+// 一个简略的 request 对象，不包含 body
+function getRequestInfo(client_req, removePrefix){
   let fullUrl = client_req.url;
   if (!!removePrefix && 
       fullUrl.length > removePrefix.length && 
@@ -95,31 +82,35 @@ async function convertToRequestObject(client_req, removePrefix){
     }
   }
 
-  const body = await getRequestBody(client_req);
-  // 根据云开发文档，构造它所需要的结构：https://cloud.tencent.com/document/product/876/41776
   return {
       path: path,
-      httpMethod: client_req.method,
+      method: client_req.method,
       headers: client_req.headers,
-      queryStringParameters: query,
-      requestContext: {},
-      body: body,
-      isBase64Encoded: false
+      query: query
   }
 }
 
+function tryAuthorize(client_req, client_res){
+  let accessCode = "";
+  if (!!client_req.headers["authorization"] && client_req.headers["authorization"].startsWith("Bearer ak-")){
+    accessCode = client_req.headers["authorization"].substr("Bearer ak-".length)
+  }
 
-function getRequestBody(request) {
-  return new Promise((resolve) => {
-    const bodyParts = [];
-    let body;
-    request.on('data', (chunk) => {
-      bodyParts.push(chunk);
-    }).on('end', () => {
-      body = Buffer.concat(bodyParts).toString();
-      resolve(body)
-    });
-  });
+  if (!!allowed_codes){
+    if (!accessCode || !allowed_codes[accessCode]){
+      const statusCode = !accessCode ? 401 : 403;
+      const responseText = !accessCode ? "UnAuthorized" : `Code '${accessCode}' not allowed.`
+
+      console.log("Access denied: " + responseText);
+      localReply(client_res, statusCode, responseText)
+      return false;
+    }
+    console.log("Client user:" + allowed_codes[accessCode]);
+  } else {
+    console.log("Auth disabled");
+    readAccessCodes();
+  }
+  return true;
 }
 
 function localReply(client_res, statusCode, content, headers){
