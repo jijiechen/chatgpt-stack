@@ -1,6 +1,8 @@
 'use strict';
 
-var http = require('http');
+const http = require('http');
+const https = require('https');
+const fs = require('fs');
 
 process.on('uncaughtException', function(err){
   console.error('uncaughtException: ' + err.message);
@@ -8,7 +10,17 @@ process.on('uncaughtException', function(err){
 });
 
 
-http.createServer(onRequest).listen(9000);
+http.createServer(onRequest).listen(8080);
+const httpsOptions = {
+  key: '/app/certs/server.key',
+  cert: '/app/certs/server.crt'
+};
+
+if (fs.existsSync(httpsOptions.key) && fs.existsSync(httpsOptions.cert)){
+  httpsOptions.key = fs.readFileSync(httpsOptions.key);
+  httpsOptions.cert = fs.readFileSync(httpsOptions.cert);
+  https.createServer(httpsOptions, onRequest).listen(8443);
+}
 
 const allowed_codes = readAccessCodes();
 
@@ -129,7 +141,6 @@ function localReply(client_res, statusCode, content, headers){
 }
 
 function readAccessCodes(){
-  const fs = require('fs');
   const accessCodesFile = './access-codes.json';
   let accessCodeContent = '';
 
