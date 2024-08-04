@@ -7,8 +7,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "request": "2.88.2",
-    "base64-js": "1.5.1",
     "@cloudbase/node-sdk": "2.10.0"
   }
 }
