@@ -79,6 +79,10 @@ async function handleProxy(request, response, reqInfo, retrying){
       timeout: 58000
     };
   
+    if(process.env.DEBUG_ENABLED){
+      console.log("OpenAI request options", JSON.stringify(options));
+    }
+
     var proxy = https.request(options, function (res) {
       response.writeHead(res.statusCode, res.headers)
       res.pipe(response, {

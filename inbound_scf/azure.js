@@ -109,6 +109,11 @@ async function handleProxy(request, response, pathRewrite, retrying){
       timeout: 58000
     };
   
+    
+    if(process.env.DEBUG_ENABLED){
+      console.log("Azure OpenAI request options", JSON.stringify(options));
+    }
+
     var proxy = https.request(options, function (res) {
       response.writeHead(res.statusCode, res.headers)
       res.pipe(response, {

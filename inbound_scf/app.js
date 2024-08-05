@@ -11,6 +11,7 @@ process.on('uncaughtException', function(err){
 
 
 http.createServer(onRequest).listen(8080);
+console.log("HTTP server running on port 8080...")
 const httpsOptions = {
   key: '/app/certs/server.key',
   cert: '/app/certs/server.crt'
@@ -20,6 +21,7 @@ if (fs.existsSync(httpsOptions.key) && fs.existsSync(httpsOptions.cert)){
   httpsOptions.key = fs.readFileSync(httpsOptions.key);
   httpsOptions.cert = fs.readFileSync(httpsOptions.cert);
   https.createServer(httpsOptions, onRequest).listen(8443);
+  console.log("HTTPS server running on port 8443...")
 }
 
 const allowed_codes = readAccessCodes();
