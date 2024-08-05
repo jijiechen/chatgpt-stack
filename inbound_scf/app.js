@@ -26,10 +26,19 @@ const allowed_codes = readAccessCodes();
 
 const azure = require("./azure.js");
 const openai = require("./openai.js");
+let allowedOrigins = []
+if (!!process.env.CORS_ALLOWED_ORIGINS){
+  process.env.CORS_ALLOWED_ORIGINS.split(',').forEach(c =>{
+    allowedOrigins.push(c.trim());
+  });
+}
 
 async function onRequest(client_req, client_res) {
   const requestId = client_req.headers["x-api-requestid"] || "(empty)";
   try{
+    if (!handleCors(client_req, client_res)){
+      return;
+    }
     if (!tryAuthorize(client_req, client_res)){
       return;
     };
@@ -63,6 +72,33 @@ async function onRequest(client_req, client_res) {
       client_res.end(`Internal server error: ${ex.toString()}\nRequestId:${requestId}`);
     }
     catch(_){}
+  }
+}
+
+function handleCors(req, res){
+  if (!allowedOrigins.length){
+    // true 表示后面可继续处理
+    return true;
+  }
+
+  if(req.headers.origin && allowedOrigins.indexOf(req.headers.origin) > -1) {
+      if (req.method == 'OPTIONS') {
+        const headers = {
+          "Access-Control-Allow-Origin": req.headers.origin,
+          "Access-Control-Allow-Methods": '*',
+          "Access-Control-Allow-Headers": '*',
+          "Access-Control-Max-Age": 86400,
+        };
+
+        res.writeHead(200, headers);
+        res.end()
+        return false;
+      }
+      return true;
+  } else {
+    res.writeHead(403);
+    res.end()
+    return false;
   }
 }
 
